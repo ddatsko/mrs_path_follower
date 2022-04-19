@@ -41,9 +41,9 @@ namespace path_follower {
         /* other parameters */
         // TODO: consider using std::list here for better performance and code simplicity
         std::vector<mrs_msgs::Reference> m_points_to_follow;
+        std::string m_frame_of_reference;
         size_t m_current_point_to_follow_index;
         int m_sequence_counter = 0;
-        double m_drones_altitude = 6;
         int m_points_to_load_at_once = 5;
         double m_threshold_distance_to_first_point = 1.0;
         bool m_first_point_passed = false;

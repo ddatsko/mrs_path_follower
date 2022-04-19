@@ -34,7 +34,8 @@ namespace path_follower {
         }
 
         // | --------------------- tf transformer --------------------- |
-        m_transformer = mrs_lib::Transformer("PathFollower", m_uav_name);
+        m_transformer = mrs_lib::Transformer("PathFollower");
+        m_transformer.setDefaultPrefix(m_uav_name);
 
         m_trajectory_generator_service_client = nh.serviceClient<mrs_msgs::PathSrv>(
                 "/" + m_uav_name + "/trajectory_generation/path");
@@ -53,41 +54,6 @@ namespace path_follower {
         ROS_INFO_ONCE("[PathFollower]: initialized");
 
         m_is_initialized = true;
-
-    }
-
-
-    mrs_msgs::Path
-    PathFollower::_generate_path_for_simulation_one_drone(std::vector<std::pair<double, double>> &points_to_visit) {
-        mrs_msgs::Path path;
-
-        // Set the parameters for trajectory generation
-        path.header.stamp = ros::Time::now();
-        path.header.seq = m_sequence_counter++;
-        path.header.frame_id = "gps_origin";
-
-        path.fly_now = true;
-        path.use_heading = false;
-        path.stop_at_waypoints = false;
-        path.loop = false;
-        path.override_constraints = false;
-
-        // TODO: find out what this parameter means
-        path.relax_heading = true;
-
-        std::vector<mrs_msgs::Reference> points;
-
-        for (const auto &p: points_to_visit) {
-            mrs_msgs::Reference point_3d;
-            point_3d.heading = 1;
-
-            point_3d.position.x = p.first;
-            point_3d.position.y = p.second;
-            point_3d.position.z = m_drones_altitude;
-            points.push_back(point_3d);
-        }
-        path.points = points;
-        return path;
 
     }
 
@@ -111,7 +77,7 @@ namespace path_follower {
                 ROS_ERROR("Could not get the transform to transform odometry message to gps");
                 return;
             }
-            auto gps_frame_msg = m_transformer.transform(transform.value(), msg);
+            auto gps_frame_msg = m_transformer.transform(msg, transform.value());
             if (!gps_frame_msg.has_value()) {
                 ROS_ERROR("Could not transform odometry message to gps frame");
                 return;
@@ -139,8 +105,8 @@ namespace path_follower {
 
     void PathFollower::update_path_message_template(const mrs_msgs::PathSrv::Request &req) {
         // Copy some parameters to remember the user preferences. Copy element-wise to not copy all the points too
-        m_path_message_template.fly_now = true;
         m_path_message_template.loop = false;
+        m_path_message_template.fly_now = true;
         m_path_message_template.override_constraints = req.path.override_constraints;
         m_path_message_template.relax_heading = req.path.relax_heading;
         m_path_message_template.use_heading = req.path.use_heading;
@@ -154,13 +120,50 @@ namespace path_follower {
     }
 
     bool PathFollower::callback_follow_path_srv(mrs_msgs::PathSrv::Request &req, mrs_msgs::PathSrv::Response &res) {
+        res.success = false;
         if (req.path.fly_now == false || req.path.loop == true) {
-            res.success = false;
             res.message = "Error. False value of fly_now and true value of loop are not supported still...";
             return true;
         }
+        if (req.path.points.empty()) {
+            res.message = "Error: empty path";
+            return true;
+        }
+
+        auto transform = m_transformer.getTransform(req.path.header.frame_id, "gps_origin");
+        if (!transform.has_value()) {
+            ROS_ERROR("ERROR: could not get transform to local origin");
+            res.message = "ERROR: could not get transform to local origin";
+            return true;
+        }
+
+        auto path_transformed = req.path.points;
+        for (auto &p: path_transformed) {
+            mrs_msgs::ReferenceStamped ref;
+            ref.reference = p;
+            ref.header.frame_id = req.path.header.frame_id;
+
+            geometry_msgs::Point point = p.position;
+            std::cout << "Before: " << p.position.x << " " << p.position.y << std::endl;
+            double altitude = point.z;
+
+            auto points_transformed = m_transformer.transform(point, transform.value());
+            if (!points_transformed.has_value()) {
+                ROS_ERROR("Error. Could not transform path");
+                res.message = "Error. Could not transform path";
+                return true;
+            }
+
+            p.position = points_transformed.value();
+            if (req.path.header.frame_id == "latlon_origin") {
+                p.position.z = altitude;
+            }
+            std::cout << p.position.x << " " << p.position.y << std::endl;
+        }
+
         update_path_message_template(req);
-        m_points_to_follow = req.path.points;
+        m_current_point_to_follow_index = 0;
+        m_points_to_follow = path_transformed;
         m_new_path_request = true;
         res.success = true;
         return true;
@@ -169,6 +172,10 @@ namespace path_follower {
     void PathFollower::send_new_trajectory_chunk(size_t n) {
         mrs_msgs::PathSrv msg;
         msg.request.path = m_path_message_template;
+        msg.request.path.header.frame_id = "gps_origin";
+        msg.request.path.header.seq = m_sequence_counter++;
+        msg.request.path.header.stamp = ros::Time::now();
+
         msg.request.path.points.reserve(n);
         size_t i;
         for (i = m_current_point_to_follow_index;
@@ -185,7 +192,11 @@ namespace path_follower {
         if (!call_res) {
             ROS_ERROR_STREAM("Could not connect to trajectory generation service. Message: " << msg.response.message);
         } else {
-            ROS_INFO_STREAM("Successfully loaded new path of size " << i);
+            if (!msg.response.success) {
+                ROS_ERROR_STREAM("Could not generate trajectory. Message: " << msg.response.message);
+            } else {
+                ROS_INFO_STREAM("Successfully loaded new path of size " << i);
+            }
         }
     }
 
