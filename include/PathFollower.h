@@ -56,17 +56,13 @@ namespace path_follower {
         mrs_lib::Transformer m_transformer;
 
         ros::ServiceClient m_trajectory_generator_service_client;
+        ros::ServiceClient m_control_manager_stop_following_service_client;
 
         void update_path_message_template(const mrs_msgs::PathSrv::Request &req);
         ros::ServiceServer m_service_server_follow_path;
         bool callback_follow_path_srv(mrs_msgs::PathSrv::Request &req, mrs_msgs::PathSrv::Response &res);
 
-        void send_new_trajectory_chunk(size_t n);
-        ros::Subscriber m_subscriber_slow_odom;
-        void callback_slow_odom(const nav_msgs::Odometry &msg);
-
-        mrs_msgs::Path _generate_path_for_simulation_one_drone(std::vector<std::pair<double, double>> &points_to_visit);
-
+        void add_heading_to_path(mrs_msgs::Path &path);
     };
 //}
 
