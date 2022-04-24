@@ -41,14 +41,14 @@ namespace path_follower {
         m_trajectory_generator_service_client = nh.serviceClient<mrs_msgs::PathSrv>(
                 "/" + m_uav_name + "/trajectory_generation/path");
         if (!m_trajectory_generator_service_client.isValid()) {
-            ROS_ERROR("Path generation service is not valid");
+            ROS_ERROR("[PathFollower]: Path generation service is not valid");
             ros::shutdown();
             return;
         }
 
         m_control_manager_stop_following_service_client = nh.serviceClient<std_srvs::Trigger>("/" + m_uav_name + "/control_manager/stop_trajectory_tracking");
         if (!m_control_manager_stop_following_service_client.isValid()) {
-            ROS_WARN("Could not connect to control_manager/stop_trajectory_tracking service");
+            ROS_WARN("[PathFollower]: Could not connect to control_manager/stop_trajectory_tracking service");
         }
 
         m_service_server_follow_path = nh.advertiseService("/" + m_uav_name + "/path_to_follow", &PathFollower::callback_follow_path_srv,
@@ -91,7 +91,7 @@ namespace path_follower {
         // TODO: make frame a configurable parameter, and not just hardcode it
         auto transform = m_transformer.getTransform(req.path.header.frame_id, "gps_origin");
         if (!transform.has_value()) {
-            ROS_ERROR("ERROR: could not get transform to local origin");
+            ROS_ERROR("[PathFollower]: ERROR: could not get transform to local origin");
             res.message = "ERROR: could not get transform to local origin";
             return true;
         }
@@ -108,7 +108,7 @@ namespace path_follower {
 
             auto points_transformed = m_transformer.transform(point, transform.value());
             if (!points_transformed.has_value()) {
-                ROS_ERROR("Error. Could not transform path");
+                ROS_ERROR("[PathFollower]: Error. Could not transform path");
                 res.message = "Error. Could not transform path";
                 return true;
             }
@@ -122,18 +122,21 @@ namespace path_follower {
         update_path_message_template(req);
         req.path.header.seq = m_sequence_counter++;
         req.path.header.frame_id = "gps_origin";
-        req.path.points = m_points_to_follow;
+        req.path.points = path_transformed;
         add_heading_to_path(req.path);
 
         // Try to make the drone stop for trajectory regeneration. Don't check the result as even if the drone is not stopped -
         // trajectory may be regenerated
         std_srvs::Trigger trigger;
         m_control_manager_stop_following_service_client.call(trigger);
+        // Sleep for some time to let the drone stop
+        auto wait_time = ros::Duration(2, 0);
+        wait_time.sleep();
 
         m_trajectory_generator_service_client.call(req, res);
         m_points_to_follow.clear();
         if (!res.success) {
-            ROS_ERROR_STREAM("Error while calling trajectory generation. Message: " << res.message);
+            ROS_ERROR_STREAM("[PathFollower]: Error while calling trajectory generation. Message: " << res.message);
         }
 
         return true;
@@ -146,8 +149,6 @@ namespace path_follower {
             path.points[i].heading = angle;
         }
     }
-
-
 //}
 
 }  // namespace path_follower  
