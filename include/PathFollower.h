@@ -57,6 +57,7 @@ namespace path_follower {
 
         ros::ServiceClient m_trajectory_generator_service_client;
         ros::ServiceClient m_control_manager_stop_following_service_client;
+        ros::ServiceClient m_control_manager_start_following_service_client;
 
         void update_path_message_template(const mrs_msgs::PathSrv::Request &req);
         ros::ServiceServer m_service_server_follow_path;

@@ -41,14 +41,17 @@ namespace path_follower {
         m_trajectory_generator_service_client = nh.serviceClient<mrs_msgs::PathSrv>(
                 "/" + m_uav_name + "/trajectory_generation/path");
         if (!m_trajectory_generator_service_client.isValid()) {
-            ROS_ERROR("[PathFollower]: Path generation service is not valid");
-            ros::shutdown();
-            return;
+            ROS_WARN("[PathFollower]: Path generation service is not valid");
         }
 
         m_control_manager_stop_following_service_client = nh.serviceClient<std_srvs::Trigger>("/" + m_uav_name + "/control_manager/stop_trajectory_tracking");
         if (!m_control_manager_stop_following_service_client.isValid()) {
             ROS_WARN("[PathFollower]: Could not connect to control_manager/stop_trajectory_tracking service");
+        }
+
+        m_control_manager_start_following_service_client = nh.serviceClient<std_srvs::Trigger>("/" + m_uav_name + "/control_manager/start_trajectory_tracking");
+        if (!m_control_manager_start_following_service_client.isValid()) {
+            ROS_WARN("[PathFollower]: Could not connect to control_manager/start_trajectory_tracking service");
         }
 
         m_service_server_follow_path = nh.advertiseService("/" + m_uav_name + "/path_to_follow", &PathFollower::callback_follow_path_srv,
@@ -133,12 +136,18 @@ namespace path_follower {
         auto wait_time = ros::Duration(2, 0);
         wait_time.sleep();
 
+        req.path.fly_now = false;
         m_trajectory_generator_service_client.call(req, res);
         m_points_to_follow.clear();
         if (!res.success) {
             ROS_ERROR_STREAM("[PathFollower]: Error while calling trajectory generation. Message: " << res.message);
+        } else {
+            std_srvs::Trigger trigger_start_tracking;
+            if (!m_control_manager_start_following_service_client.call(trigger_start_tracking) || !trigger_start_tracking.response.success) {
+                ROS_ERROR_STREAM("[PathFollower]: Could not start trajectory tracking. Message: " << trigger_start_tracking.response.message);
+                res.message = "Could not call service to start the trajectory tracking";
+            }
         }
-
         return true;
     }
 
