@@ -156,23 +156,29 @@ namespace path_follower {
         double old_heading = 0;
         bool first_not_straight = true;
         //TODO: move this staff to path_generator and combine them somehow
-        for (size_t i = 1; i + 1 < path.points.size(); ++i) {
+        for (size_t i = 1; i + 2 < path.points.size(); ++i) {
             auto angle1 = std::atan2(path.points[i].position.y - path.points[i - 1].position.y,
                                path.points[i].position.x - path.points[i - 1].position.x);
             auto angle2 = std::atan2(path.points[i + 1].position.y - path.points[i].position.y,
                                      path.points[i + 1].position.x - path.points[i].position.x);
 
+            auto angle3 = std::atan2(path.points[i + 2].position.y - path.points[i + 1].position.y,
+                                    path.points[i + 2].position.x - path.points[i + 1].position.x);
+
             if (std::abs(angle2 - angle1) <= 1e-2) {
                 old_heading = path.points[i].heading = angle1 + (reverse ? M_PI : 0);
+                first_not_straight = true;
+            } else if (std::abs(angle2 - angle3) <= 1e-2) {
+                old_heading = path.points[i].heading = angle2 + (reverse ? M_PI : 0);
                 first_not_straight = true;
             } else {
                 if (first_not_straight) {
                     first_not_straight = false;
                     reverse = !reverse;
                 }
-                path.points[i].heading = old_heading;
-            }
 
+            }
+            path.points[i].heading = old_heading;
         }
     }
 //}
