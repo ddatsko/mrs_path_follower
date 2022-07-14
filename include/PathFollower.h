@@ -20,7 +20,7 @@
 
 /* user includes */
 
-//}
+#include <mrs_msgs/DynamicsConstraints.h>
 
 namespace path_follower {
 
@@ -34,6 +34,7 @@ namespace path_follower {
     private:
         /* flags */
         bool m_is_initialized = false;
+        bool m_constraints_loaded = false;
 
         /* ros parameters */
         std::string m_uav_name;
@@ -50,6 +51,7 @@ namespace path_follower {
 
         bool m_new_path_request = false;
         mrs_msgs::Path m_path_message_template;
+        mrs_msgs::DynamicsConstraints m_current_constraints;
 
         // | --------------------- MRS transformer -------------------- |
 
@@ -59,11 +61,14 @@ namespace path_follower {
         ros::ServiceClient m_control_manager_stop_following_service_client;
         ros::ServiceClient m_control_manager_start_following_service_client;
 
+        ros::Subscriber m_current_constraints_subscriber;
+
+
+        void current_constraints_callback(const mrs_msgs::DynamicsConstraints &constraints);
+
         void update_path_message_template(const mrs_msgs::PathSrv::Request &req);
         ros::ServiceServer m_service_server_follow_path;
         bool callback_follow_path_srv(mrs_msgs::PathSrv::Request &req, mrs_msgs::PathSrv::Response &res);
-
-        void add_heading_to_path(mrs_msgs::Path &path);
     };
 //}
 

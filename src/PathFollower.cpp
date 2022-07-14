@@ -38,6 +38,8 @@ namespace path_follower {
         m_transformer = mrs_lib::Transformer("PathFollower");
         m_transformer.setDefaultPrefix(m_uav_name);
 
+        m_current_constraints_subscriber = nh.subscribe("/" + m_uav_name + "/control_manager/current_constraints", 10, &PathFollower::current_constraints_callback, this);
+
         m_trajectory_generator_service_client = nh.serviceClient<mrs_msgs::PathSrv>(
                 "/" + m_uav_name + "/trajectory_generation/path");
         if (!m_trajectory_generator_service_client.isValid()) {
@@ -87,6 +89,12 @@ namespace path_follower {
             res.message = "Error. False value of fly_now and true value of loop are not supported still...";
             return true;
         }
+        if (!m_constraints_loaded) {
+            res.message = "Error. Current constraints are not loaded...";
+            ROS_ERROR_STREAM("[PathFollower]: " << res.message << "\n");
+        }
+
+
         if (req.path.points.empty()) {
             res.message = "Error: empty path";
             return true;
@@ -108,6 +116,7 @@ namespace path_follower {
 
             geometry_msgs::Point point = p.position;
             double altitude = point.z;
+            double heading = p.heading;
 
             auto points_transformed = m_transformer.transform(point, transform.value());
             if (!points_transformed.has_value()) {
@@ -120,13 +129,13 @@ namespace path_follower {
             if (req.path.header.frame_id == "latlon_origin") {
                 p.position.z = altitude;
             }
+            p.heading = heading;
         }
         // Update message header, containing constraints, speed configuration...
         update_path_message_template(req);
         req.path.header.seq = m_sequence_counter++;
         req.path.header.frame_id = "gps_origin";
         req.path.points = path_transformed;
-        add_heading_to_path(req.path);
 
         // Try to make the drone stop for trajectory regeneration. Don't check the result as even if the drone is not stopped -
         // trajectory may be regenerated
@@ -137,6 +146,15 @@ namespace path_follower {
         wait_time.sleep();
 
         req.path.fly_now = false;
+        req.path.override_constraints = true;
+        req.path.override_max_velocity_vertical = m_current_constraints.vertical_ascending_speed;
+        req.path.override_max_acceleration_vertical = m_current_constraints.vertical_ascending_acceleration;
+        req.path.override_max_jerk_vertical = m_current_constraints.vertical_ascending_jerk;
+        req.path.override_max_jerk_horizontal = m_current_constraints.horizontal_jerk;
+        req.path.override_max_acceleration_horizontal = std::min(req.path.override_max_acceleration_horizontal, m_current_constraints.horizontal_acceleration);
+        req.path.override_max_velocity_horizontal = std::min(req.path.override_max_velocity_horizontal, m_current_constraints.horizontal_speed);
+
+
         m_trajectory_generator_service_client.call(req, res);
         m_points_to_follow.clear();
         if (!res.success) {
@@ -151,36 +169,12 @@ namespace path_follower {
         return true;
     }
 
-    void PathFollower::add_heading_to_path(mrs_msgs::Path &path) {
-        bool reverse = false;
-        double old_heading = 0;
-        bool first_not_straight = true;
-        //TODO: move this staff to path_generator and combine them somehow
-        for (size_t i = 1; i + 2 < path.points.size(); ++i) {
-            auto angle1 = std::atan2(path.points[i].position.y - path.points[i - 1].position.y,
-                               path.points[i].position.x - path.points[i - 1].position.x);
-            auto angle2 = std::atan2(path.points[i + 1].position.y - path.points[i].position.y,
-                                     path.points[i + 1].position.x - path.points[i].position.x);
 
-            auto angle3 = std::atan2(path.points[i + 2].position.y - path.points[i + 1].position.y,
-                                    path.points[i + 2].position.x - path.points[i + 1].position.x);
-
-            if (std::abs(angle2 - angle1) <= 1e-2) {
-                old_heading = path.points[i].heading = angle1 + (reverse ? M_PI : 0);
-                first_not_straight = true;
-            } else if (std::abs(angle2 - angle3) <= 1e-2) {
-                old_heading = path.points[i].heading = angle2 + (reverse ? M_PI : 0);
-                first_not_straight = true;
-            } else {
-                if (first_not_straight) {
-                    first_not_straight = false;
-                    reverse = !reverse;
-                }
-
-            }
-            path.points[i].heading = old_heading;
-        }
+    void PathFollower::current_constraints_callback(const mrs_msgs::DynamicsConstraints &constraints) {
+        m_constraints_loaded = true;
+        m_current_constraints = constraints;
     }
+
 //}
 
 }  // namespace path_follower  
