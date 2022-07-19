@@ -84,6 +84,7 @@ namespace path_follower {
     }
 
     bool PathFollower::callback_follow_path_srv(mrs_msgs::PathSrv::Request &req, mrs_msgs::PathSrv::Response &res) {
+        ROS_INFO_STREAM("[PathFollower]: Path following service is called...");
         res.success = false;
         if (req.path.fly_now == false || req.path.loop == true) {
             res.message = "Error. False value of fly_now and true value of loop are not supported still...";
@@ -153,6 +154,7 @@ namespace path_follower {
         req.path.override_max_jerk_horizontal = m_current_constraints.horizontal_jerk;
         req.path.override_max_acceleration_horizontal = std::min(req.path.override_max_acceleration_horizontal, m_current_constraints.horizontal_acceleration);
         req.path.override_max_velocity_horizontal = std::min(req.path.override_max_velocity_horizontal, m_current_constraints.horizontal_speed);
+        req.path.use_heading = true;
 
 
         m_trajectory_generator_service_client.call(req, res);
