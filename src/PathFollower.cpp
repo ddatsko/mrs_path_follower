@@ -4,7 +4,6 @@
 #include <pluginlib/class_list_macros.h>
 #include <mrs_msgs/PathSrv.h>
 #include "utils.h"
-#include <std_srvs/Trigger.h>
 
 namespace path_follower {
 
@@ -38,7 +37,10 @@ namespace path_follower {
         m_transformer = mrs_lib::Transformer("PathFollower");
         m_transformer.setDefaultPrefix(m_uav_name);
 
-        m_current_constraints_subscriber = nh.subscribe("/" + m_uav_name + "/control_manager/current_constraints", 10, &PathFollower::current_constraints_callback, this);
+        m_current_constraints_subscriber = nh.subscribe("/" + m_uav_name + "/control_manager/current_constraints", 10,
+                                                        &PathFollower::current_constraints_callback, this);
+        m_odometry_subscriber = nh.subscribe("odometry_in", 10, &PathFollower::odometry_callback, this);
+
 
         m_trajectory_generator_service_client = nh.serviceClient<mrs_msgs::PathSrv>(
                 "/" + m_uav_name + "/trajectory_generation/path");
@@ -46,19 +48,23 @@ namespace path_follower {
             ROS_WARN("[PathFollower]: Path generation service is not valid");
         }
 
-        m_control_manager_stop_following_service_client = nh.serviceClient<std_srvs::Trigger>("/" + m_uav_name + "/control_manager/stop_trajectory_tracking");
+        m_control_manager_stop_following_service_client = nh.serviceClient<std_srvs::Trigger>(
+                "/" + m_uav_name + "/control_manager/stop_trajectory_tracking");
         if (!m_control_manager_stop_following_service_client.isValid()) {
             ROS_WARN("[PathFollower]: Could not connect to control_manager/stop_trajectory_tracking service");
         }
 
-        m_control_manager_start_following_service_client = nh.serviceClient<std_srvs::Trigger>("/" + m_uav_name + "/control_manager/start_trajectory_tracking");
+        m_control_manager_start_following_service_client = nh.serviceClient<std_srvs::Trigger>(
+                "/" + m_uav_name + "/control_manager/start_trajectory_tracking");
         if (!m_control_manager_start_following_service_client.isValid()) {
             ROS_WARN("[PathFollower]: Could not connect to control_manager/start_trajectory_tracking service");
         }
 
-        m_service_server_follow_path = nh.advertiseService("/" + m_uav_name + "/path_to_follow", &PathFollower::callback_follow_path_srv,
+        m_service_server_follow_path = nh.advertiseService("/" + m_uav_name + "/path_to_follow",
+                                                           &PathFollower::callback_follow_path_srv,
                                                            this);
-
+        m_service_server_pause = nh.advertiseService("pause", &PathFollower::callback_pause, this);
+        m_service_server_resume = nh.advertiseService("resume", &PathFollower::callback_resume, this);
 
         ROS_INFO_ONCE("[PathFollower]: initialized");
 
@@ -152,19 +158,25 @@ namespace path_follower {
         req.path.override_max_acceleration_vertical = m_current_constraints.vertical_ascending_acceleration;
         req.path.override_max_jerk_vertical = m_current_constraints.vertical_ascending_jerk;
         req.path.override_max_jerk_horizontal = m_current_constraints.horizontal_jerk;
-        req.path.override_max_acceleration_horizontal = std::min(req.path.override_max_acceleration_horizontal, m_current_constraints.horizontal_acceleration);
-        req.path.override_max_velocity_horizontal = std::min(req.path.override_max_velocity_horizontal, m_current_constraints.horizontal_speed);
+        req.path.override_max_acceleration_horizontal = std::min(req.path.override_max_acceleration_horizontal,
+                                                                 m_current_constraints.horizontal_acceleration);
+        req.path.override_max_velocity_horizontal = std::min(req.path.override_max_velocity_horizontal,
+                                                             m_current_constraints.horizontal_speed);
         req.path.use_heading = true;
 
+        m_last_request = req;
+        m_current_point_to_follow_index = 0;
+        m_is_in_pause = false;
 
         m_trajectory_generator_service_client.call(req, res);
-        m_points_to_follow.clear();
         if (!res.success) {
             ROS_ERROR_STREAM("[PathFollower]: Error while calling trajectory generation. Message: " << res.message);
         } else {
             std_srvs::Trigger trigger_start_tracking;
-            if (!m_control_manager_start_following_service_client.call(trigger_start_tracking) || !trigger_start_tracking.response.success) {
-                ROS_ERROR_STREAM("[PathFollower]: Could not start trajectory tracking. Message: " << trigger_start_tracking.response.message);
+            if (!m_control_manager_start_following_service_client.call(trigger_start_tracking) ||
+                !trigger_start_tracking.response.success) {
+                ROS_ERROR_STREAM("[PathFollower]: Could not start trajectory tracking. Message: "
+                                         << trigger_start_tracking.response.message);
                 res.message = "Could not call service to start the trajectory tracking";
             }
         }
@@ -175,6 +187,64 @@ namespace path_follower {
     void PathFollower::current_constraints_callback(const mrs_msgs::DynamicsConstraints &constraints) {
         m_constraints_loaded = true;
         m_current_constraints = constraints;
+    }
+
+    void PathFollower::odometry_callback(const nav_msgs::Odometry &odometry) {
+        // Considering here that the odometry is already in the right coordinate frame
+        if (m_last_request.path.points.empty() ||
+            m_current_point_to_follow_index >= m_last_request.path.points.size() ||
+            m_is_in_pause) {
+            return;
+        }
+        auto &cur_pos = odometry.pose.pose.position;
+        auto &p = m_last_request.path.points[m_current_point_to_follow_index].position;
+        double distance = std::sqrt(
+                std::pow(p.x - cur_pos.x, 2) + std::pow(p.y - cur_pos.y, 2) + std::pow(p.z - cur_pos.z, 2));
+        if (distance < m_visited_point_tolerance) {
+            ROS_INFO_STREAM("[PathFollower]: Reached path point: " << p.x << ", " << p.y << ", " << p.z);
+            ++m_current_point_to_follow_index;
+        }
+
+    }
+
+    bool PathFollower::callback_pause(std_srvs::Trigger::Request &req, std_srvs::Trigger::Response &res) {
+        ROS_INFO_STREAM("[PathFollower]: Path following pause is called");
+        std_srvs::Trigger trigger;
+        m_control_manager_stop_following_service_client.call(trigger);
+        m_is_in_pause = true;
+        ROS_INFO_STREAM("[PathFollower]: Path following is paused");
+        res.success = true;
+        return true;
+    }
+
+    bool PathFollower::callback_resume(std_srvs::Trigger::Request &req, std_srvs::Trigger::Response &res) {
+        m_last_request.path.points.erase(m_last_request.path.points.begin(), m_last_request.path.points.begin() + m_current_point_to_follow_index);
+        auto request_copy = m_last_request;
+        m_current_point_to_follow_index = 0;
+
+        mrs_msgs::PathSrv::Response trajectory_generation_res;
+        res.success = true;
+        m_trajectory_generator_service_client.call(request_copy, trajectory_generation_res);
+        if (!trajectory_generation_res.success) {
+            res.success = false;
+            ROS_ERROR_STREAM("[PathFollower]: Error while calling trajectory generation. Message: " << trajectory_generation_res.message);
+        } else {
+            std_srvs::Trigger trigger_start_tracking;
+            if (!m_control_manager_start_following_service_client.call(trigger_start_tracking) ||
+                !trigger_start_tracking.response.success) {
+                ROS_ERROR_STREAM("[PathFollower]: Could not start trajectory tracking. Message: "
+                                         << trigger_start_tracking.response.message);
+                res.success = false;
+                res.message = "Could not call service to start the trajectory tracking";
+            }
+        }
+        if (!res.success) {
+            ROS_ERROR_STREAM("[PathFollower]: Could not resume trajectory following due to errors");
+        } else {
+            ROS_INFO_STREAM("[PathFollower]: Successfully resumed trajectory following");
+            m_is_in_pause = false;
+        }
+        return true;
     }
 
 //}

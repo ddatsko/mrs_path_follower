@@ -22,6 +22,8 @@
   <arg     if="$(arg standalone)" name="nodelet_manager" value=""/>
   <arg unless="$(arg standalone)" name="nodelet_manager" value="$(arg manager)"/>
 
+  <arg name="odometry_topic" default="/$(arg UAV_NAME)/odometry/odom_gps" />
+
   <!-- Namespace - all topics and parameters will be remapped using this namespace as a prefix (eg.: "/vision_example/image_in" to "/uav1/vision_example/image_in") -->
   <group ns="$(arg UAV_NAME)">
 
@@ -38,6 +40,7 @@
       <rosparam file="$(find path_follower)/config/$(arg RUN_TYPE).yaml" />
 
       <!-- Subscribers (note that the topic names will also be remapped using the namespace as a prefix) -->
+      <remap from="~odometry_in" to="$(arg odometry_topic)" />
 
       <!-- Publishers (note that the topic names will also be remapped using the namespace as a prefix) -->
 

@@ -17,6 +17,7 @@
 /* other important includes */
 #include <nav_msgs/Odometry.h>
 #include <mrs_msgs/PathSrv.h>
+#include <std_srvs/Trigger.h>
 
 /* user includes */
 
@@ -41,13 +42,12 @@ namespace path_follower {
 
         /* other parameters */
         // TODO: consider using std::list here for better performance and code simplicity
-        std::vector<mrs_msgs::Reference> m_points_to_follow;
         std::string m_frame_of_reference;
         size_t m_current_point_to_follow_index;
         int m_sequence_counter = 0;
-        int m_points_to_load_at_once = 5;
-        double m_threshold_distance_to_first_point = 1.0;
-        bool m_first_point_passed = false;
+        double m_visited_point_tolerance = 0.5;
+        bool m_is_in_pause = false;
+        mrs_msgs::PathSrv::Request m_last_request;
 
         bool m_new_path_request = false;
         mrs_msgs::Path m_path_message_template;
@@ -61,14 +61,25 @@ namespace path_follower {
         ros::ServiceClient m_control_manager_stop_following_service_client;
         ros::ServiceClient m_control_manager_start_following_service_client;
 
-        ros::Subscriber m_current_constraints_subscriber;
+        ros::ServiceServer m_service_server_follow_path;
+        ros::ServiceServer m_service_server_pause;
+        ros::ServiceServer m_service_server_resume;
 
+        ros::Subscriber m_current_constraints_subscriber;
+        ros::Subscriber m_odometry_subscriber;
 
         void current_constraints_callback(const mrs_msgs::DynamicsConstraints &constraints);
+        void odometry_callback(const nav_msgs::Odometry &odometry);
 
         void update_path_message_template(const mrs_msgs::PathSrv::Request &req);
-        ros::ServiceServer m_service_server_follow_path;
+
         bool callback_follow_path_srv(mrs_msgs::PathSrv::Request &req, mrs_msgs::PathSrv::Response &res);
+        bool callback_pause(std_srvs::Trigger::Request &req, std_srvs::Trigger::Response &res);
+        bool callback_resume(std_srvs::Trigger::Request &req, std_srvs::Trigger::Response &res);
+
+
+
+
     };
 //}
 
