@@ -66,6 +66,8 @@ namespace path_follower {
         m_service_server_pause = nh.advertiseService("pause", &PathFollower::callback_pause, this);
         m_service_server_resume = nh.advertiseService("resume", &PathFollower::callback_resume, this);
 
+        m_path_publisher = nh.advertise<mrs_msgs::Path>("followed_path", 5);
+
         ROS_INFO_ONCE("[PathFollower]: initialized");
 
         m_is_initialized = true;
@@ -143,6 +145,7 @@ namespace path_follower {
         req.path.header.seq = m_sequence_counter++;
         req.path.header.frame_id = "gps_origin";
         req.path.points = path_transformed;
+        req.path.header.stamp = ros::Time::now();
 
         // Try to make the drone stop for trajectory regeneration. Don't check the result as even if the drone is not stopped -
         // trajectory may be regenerated
@@ -180,6 +183,9 @@ namespace path_follower {
                 res.message = "Could not call service to start the trajectory tracking";
             }
         }
+
+        m_path_publisher.publish(req.path);
+
         return true;
     }
 
@@ -207,7 +213,7 @@ namespace path_follower {
 
     }
 
-    bool PathFollower::callback_pause(std_srvs::Trigger::Request &req, std_srvs::Trigger::Response &res) {
+    bool PathFollower::callback_pause([[maybe_unused]] std_srvs::Trigger::Request &req, std_srvs::Trigger::Response &res) {
         ROS_INFO_STREAM("[PathFollower]: Path following pause is called");
         std_srvs::Trigger trigger;
         m_control_manager_stop_following_service_client.call(trigger);
@@ -217,7 +223,7 @@ namespace path_follower {
         return true;
     }
 
-    bool PathFollower::callback_resume(std_srvs::Trigger::Request &req, std_srvs::Trigger::Response &res) {
+    bool PathFollower::callback_resume([[maybe_unused]] std_srvs::Trigger::Request &req, std_srvs::Trigger::Response &res) {
         m_last_request.path.points.erase(m_last_request.path.points.begin(), m_last_request.path.points.begin() + m_current_point_to_follow_index);
         auto request_copy = m_last_request;
         m_current_point_to_follow_index = 0;

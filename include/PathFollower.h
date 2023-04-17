@@ -68,6 +68,8 @@ namespace path_follower {
         ros::Subscriber m_current_constraints_subscriber;
         ros::Subscriber m_odometry_subscriber;
 
+        ros::Publisher m_path_publisher;
+
         void current_constraints_callback(const mrs_msgs::DynamicsConstraints &constraints);
         void odometry_callback(const nav_msgs::Odometry &odometry);
 
